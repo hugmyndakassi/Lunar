@@ -296,43 +296,9 @@ public sealed class LibraryMapper
 
         using var pebLock = new SafePebLock(_processContext);
 
-        if (_processContext.Architecture == Architecture.X86)
-        {
-            // Read the TLS entry
+        // Remove the TLS entry from the TLS list
 
-            var tlsEntry = _processContext.Process.ReadStruct<LdrpTlsEntry32>(_tlsData.EntryAddress);
-
-            // Remove the TLS entry from the TLS list
-
-            var previousEntryAddress = UnsafeHelpers.WrapPointer(tlsEntry.EntryLinks.Blink);
-            var previousEntry = _processContext.Process.ReadStruct<ListEntry32>(previousEntryAddress);
-            previousEntry = previousEntry with { Flink = tlsEntry.EntryLinks.Flink };
-            _processContext.Process.WriteStruct(previousEntryAddress, previousEntry);
-
-            var nextEntryAddress = UnsafeHelpers.WrapPointer(tlsEntry.EntryLinks.Flink);
-            var nextEntry = _processContext.Process.ReadStruct<ListEntry32>(nextEntryAddress);
-            nextEntry = nextEntry with { Blink = tlsEntry.EntryLinks.Blink };
-            _processContext.Process.WriteStruct(nextEntryAddress, nextEntry);
-        }
-
-        else
-        {
-            // Read the TLS entry
-
-            var tlsEntry = _processContext.Process.ReadStruct<LdrpTlsEntry64>(_tlsData.EntryAddress);
-
-            // Remove the TLS entry from the TLS list
-
-            var previousEntryAddress = UnsafeHelpers.WrapPointer(tlsEntry.EntryLinks.Blink);
-            var previousEntry = _processContext.Process.ReadStruct<ListEntry64>(previousEntryAddress);
-            previousEntry = previousEntry with { Flink = tlsEntry.EntryLinks.Flink };
-            _processContext.Process.WriteStruct(previousEntryAddress, previousEntry);
-
-            var nextEntryAddress = UnsafeHelpers.WrapPointer(tlsEntry.EntryLinks.Flink);
-            var nextEntry = _processContext.Process.ReadStruct<ListEntry64>(nextEntryAddress);
-            nextEntry = nextEntry with { Blink = tlsEntry.EntryLinks.Blink };
-            _processContext.Process.WriteStruct(nextEntryAddress, nextEntry);
-        }
+        _processContext.RemoveListEntry(_tlsData.EntryAddress);
 
         // Free the TLS entry
 
@@ -447,16 +413,14 @@ public sealed class LibraryMapper
             var tlsIndexAddress = UnsafeHelpers.WrapPointer(tlsDirectory.AddressOfIndex);
             _processContext.Process.WriteStruct(tlsIndexAddress, _tlsData.Index);
 
-            // Read the TLS list
+            // Read the TLS list head
 
             var tlsListHead = _processContext.Process.ReadStruct<ListEntry32>(tlsListAddress);
-            var tlsListTailAddress = UnsafeHelpers.WrapPointer(tlsListHead.Blink);
-            var tlsListTail = _processContext.Process.ReadStruct<ListEntry32>(tlsListTailAddress);
 
             // Write a TLS entry for the DLL into the process
 
             _tlsData.EntryAddress = _processContext.Process.AllocateBuffer(Unsafe.SizeOf<LdrpTlsEntry32>(), ProtectionType.ReadWrite);
-            var tlsEntry = new LdrpTlsEntry32(new ListEntry32(tlsListAddress.ToInt32(), tlsListHead.Blink), tlsDirectory, _tlsData.Index);
+            var tlsEntry = new LdrpTlsEntry32(tlsListHead with { Flink = tlsListAddress.ToInt32() }, tlsDirectory, _tlsData.Index);
 
             try
             {
@@ -464,38 +428,7 @@ public sealed class LibraryMapper
 
                 // Insert the TLS entry into the TLS list
 
-                if (tlsListAddress == tlsListTailAddress)
-                {
-                    tlsListHead = new ListEntry32(_tlsData.EntryAddress.ToInt32(), _tlsData.EntryAddress.ToInt32());
-                    _processContext.Process.WriteStruct(tlsListAddress, tlsListHead);
-                }
-
-                else
-                {
-                    try
-                    {
-                        var newTlsListHead = new ListEntry32(tlsListHead.Flink, _tlsData.EntryAddress.ToInt32());
-                        _processContext.Process.WriteStruct(tlsListAddress, newTlsListHead);
-
-                        try
-                        {
-                            var newTlsListTail = new ListEntry32(_tlsData.EntryAddress.ToInt32(), tlsListTail.Blink);
-                            _processContext.Process.WriteStruct(tlsListTailAddress, newTlsListTail);
-                        }
-
-                        catch
-                        {
-                            Executor.IgnoreExceptions(() => _processContext.Process.WriteStruct(_tlsData.EntryAddress, tlsListHead));
-                            throw;
-                        }
-                    }
-
-                    catch
-                    {
-                        Executor.IgnoreExceptions(() => _processContext.Process.WriteStruct(_tlsData.EntryAddress, tlsListHead));
-                        throw;
-                    }
-                }
+                _processContext.InsertListEntry(tlsListAddress, _tlsData.EntryAddress);
             }
 
             catch
@@ -516,16 +449,14 @@ public sealed class LibraryMapper
             var tlsIndexAddress = UnsafeHelpers.WrapPointer(tlsDirectory.AddressOfIndex);
             _processContext.Process.WriteStruct(tlsIndexAddress, _tlsData.Index);
 
-            // Read the TLS list
+            // Read the TLS list head
 
             var tlsListHead = _processContext.Process.ReadStruct<ListEntry64>(tlsListAddress);
-            var tlsListTailAddress = UnsafeHelpers.WrapPointer(tlsListHead.Blink);
-            var tlsListTail = _processContext.Process.ReadStruct<ListEntry64>(tlsListTailAddress);
 
             // Write a TLS entry for the DLL into the process
 
             _tlsData.EntryAddress = _processContext.Process.AllocateBuffer(Unsafe.SizeOf<LdrpTlsEntry64>(), ProtectionType.ReadWrite);
-            var tlsEntry = new LdrpTlsEntry64(new ListEntry64(tlsListAddress.ToInt64(), tlsListHead.Blink), tlsDirectory, _tlsData.Index);
+            var tlsEntry = new LdrpTlsEntry64(tlsListHead with { Flink = tlsListAddress.ToInt64() }, tlsDirectory, _tlsData.Index);
 
             try
             {
@@ -533,38 +464,7 @@ public sealed class LibraryMapper
 
                 // Insert the TLS entry into the TLS list
 
-                if (tlsListAddress == tlsListTailAddress)
-                {
-                    tlsListHead = new ListEntry64(_tlsData.EntryAddress.ToInt64(), _tlsData.EntryAddress.ToInt64());
-                    _processContext.Process.WriteStruct(tlsListAddress, tlsListHead);
-                }
-
-                else
-                {
-                    try
-                    {
-                        var newTlsListHead = new ListEntry64(tlsListHead.Flink, _tlsData.EntryAddress.ToInt64());
-                        _processContext.Process.WriteStruct(tlsListAddress, newTlsListHead);
-
-                        try
-                        {
-                            var newTlsListTail = new ListEntry64(_tlsData.EntryAddress.ToInt64(), tlsListTail.Blink);
-                            _processContext.Process.WriteStruct(tlsListTailAddress, newTlsListTail);
-                        }
-
-                        catch
-                        {
-                            Executor.IgnoreExceptions(() => _processContext.Process.WriteStruct(_tlsData.EntryAddress, tlsListHead));
-                            throw;
-                        }
-                    }
-
-                    catch
-                    {
-                        Executor.IgnoreExceptions(() => _processContext.Process.WriteStruct(_tlsData.EntryAddress, tlsListHead));
-                        throw;
-                    }
-                }
+                _processContext.InsertListEntry(tlsListAddress, _tlsData.EntryAddress);
             }
 
             catch

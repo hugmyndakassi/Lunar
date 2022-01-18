@@ -167,9 +167,129 @@ internal sealed class ProcessContext
         return GetModule("ntdll.dll", null).Address + _symbolHandler.GetSymbol(symbolName).RelativeAddress;
     }
 
+    internal void InsertListEntry(IntPtr listAddress, IntPtr listEntryAddress)
+    {
+        if (Architecture == Architecture.X86)
+        {
+            // Read the list entry
+
+            var listHead = Process.ReadStruct<ListEntry32>(listAddress);
+            var listTailAddress = UnsafeHelpers.WrapPointer(listHead.Blink);
+            var listTail = Process.ReadStruct<ListEntry32>(listTailAddress);
+
+            // Insert the entry into the list
+
+            if (listAddress == listTailAddress)
+            {
+                Process.WriteStruct(listAddress, new ListEntry32(listEntryAddress.ToInt32(), listEntryAddress.ToInt32()));
+            }
+
+            else
+            {
+                Process.WriteStruct(listAddress, listHead with { Blink = listEntryAddress.ToInt32() });
+
+                try
+                {
+                    Process.WriteStruct(listTailAddress, listTail with { Flink = listEntryAddress.ToInt32() });
+                }
+
+                catch
+                {
+                    Executor.IgnoreExceptions(() => Process.WriteStruct(listAddress, listHead));
+                    throw;
+                }
+            }
+        }
+
+        else
+        {
+            // Read the list entry
+
+            var listHead = Process.ReadStruct<ListEntry64>(listAddress);
+            var listTailAddress = UnsafeHelpers.WrapPointer(listHead.Blink);
+            var listTail = Process.ReadStruct<ListEntry64>(listTailAddress);
+
+            // Insert the entry into the list
+
+            if (listAddress == listTailAddress)
+            {
+                Process.WriteStruct(listAddress, new ListEntry64(listEntryAddress.ToInt64(), listEntryAddress.ToInt64()));
+            }
+
+            else
+            {
+                Process.WriteStruct(listAddress, listHead with { Blink = listEntryAddress.ToInt64() });
+
+                try
+                {
+                    Process.WriteStruct(listTailAddress, listTail with { Flink = listEntryAddress.ToInt64() });
+                }
+
+                catch
+                {
+                    Executor.IgnoreExceptions(() => Process.WriteStruct(listAddress, listHead));
+                    throw;
+                }
+            }
+        }
+    }
+
     internal void NotifyModuleLoad(IntPtr moduleAddress, string moduleFilePath)
     {
         _moduleCache.TryAdd(Path.GetFileName(moduleFilePath), new Module(moduleAddress, new PeImage(File.ReadAllBytes(moduleFilePath))));
+    }
+
+    internal void RemoveListEntry(IntPtr listEntryAddress)
+    {
+        if (Architecture == Architecture.X86)
+        {
+            // Read the list entry
+
+            var listEntry = Process.ReadStruct<ListEntry32>(listEntryAddress);
+
+            // Remove the entry from the list
+
+            if (listEntry.Flink == listEntry.Blink)
+            {
+                Process.WriteStruct(listEntryAddress, new ListEntry32());
+            }
+
+            else
+            {
+                var nextListEntryAddress = UnsafeHelpers.WrapPointer(listEntry.Flink);
+                var nextListEntry = Process.ReadStruct<ListEntry32>(nextListEntryAddress);
+                Process.WriteStruct(nextListEntryAddress, nextListEntry with { Blink = listEntry.Blink });
+
+                var previousListEntryAddress = UnsafeHelpers.WrapPointer(listEntry.Blink);
+                var previousListEntry = Process.ReadStruct<ListEntry32>(previousListEntryAddress);
+                Process.WriteStruct(previousListEntryAddress, previousListEntry with { Flink = listEntry.Flink });
+            }
+        }
+
+        else
+        {
+            // Read the list entry
+
+            var listEntry = Process.ReadStruct<ListEntry64>(listEntryAddress);
+
+            // Remove the entry from the list
+
+            if (listEntry.Flink == listEntry.Blink)
+            {
+                Process.WriteStruct(listEntryAddress, new ListEntry64());
+            }
+
+            else
+            {
+                var nextListEntryAddress = UnsafeHelpers.WrapPointer(listEntry.Flink);
+                var nextListEntry = Process.ReadStruct<ListEntry64>(nextListEntryAddress);
+                Process.WriteStruct(nextListEntryAddress, nextListEntry with { Blink = listEntry.Blink });
+
+                var previousListEntryAddress = UnsafeHelpers.WrapPointer(listEntry.Blink);
+                var previousListEntry = Process.ReadStruct<ListEntry64>(previousListEntryAddress);
+                Process.WriteStruct(previousListEntryAddress, previousListEntry with { Flink = listEntry.Flink });
+            }
+        }
     }
 
     internal string ResolveModuleName(string moduleName, string? parentName)

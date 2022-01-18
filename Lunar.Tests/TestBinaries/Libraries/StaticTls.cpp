@@ -1,7 +1,7 @@
 #include <Windows.h>
 
 static int test_flag = 0;
-static thread_local int test_variable = 0xFFFF;
+static thread_local int test_variable = 0xFCFC;
 
 void __stdcall Thread(unsigned long* reason)
 {
@@ -9,16 +9,17 @@ void __stdcall Thread(unsigned long* reason)
     {
         case DLL_PROCESS_ATTACH:
         {
-            if (&test_variable != nullptr)
+            if (&test_variable != nullptr && test_variable == 0xFCFC)
             {
                 test_flag = 1;
             }
 
             break;
         }
+
         case DLL_PROCESS_DETACH:
         {
-            if (&test_variable != nullptr)
+            if (&test_variable != nullptr && test_variable == 0xFCFC)
             {
                 test_flag = 2;
             }
@@ -58,6 +59,7 @@ bool __stdcall DllMain(void* moduleHandle, unsigned long reason, void* reserved)
 
             break;
         }
+
         case DLL_PROCESS_DETACH:
         {
             if (test_flag == 2)
